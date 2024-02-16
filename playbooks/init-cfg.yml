@@ -1,0 +1,67 @@
+- name: Initial server configuration
+  hosts: servers
+  become: yes
+  collections:
+    - community.general
+  tasks:
+    - name: Update cache
+      apt:
+        update_cache: yes
+
+    - name: Create new user with sudo privileges
+      user:
+        name: "{{ created_username }}"
+        state: present
+        groups: sudo
+        append: true
+        create_home: true
+
+    - name: Install OpenSSH server
+      ansible.builtin.apt:
+        name: openssh-server
+        state: present
+
+    - name: Set authorized key for remote user
+      ansible.posix.authorized_key:
+        user: "{{ created_username }}"
+        state: present
+        key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/' + key_name_ssh) }}"
+
+    - name: Disable password authentication for root
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin prohibit-password'
+
+    - name: Add Docker signing key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+#        dest: /etc/apt/trusted.gpg.d/docker.gpg
+#        mode: '0644'
+#        force: true
+
+    - name: Add Docker APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable"
+        state: present
+
+    - name: Add user to the docker group
+      ansible.builtin.user:
+        name: created_username
+        groups: docker
+        append: yes
+
+
+    - name: Install dependencies
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: latest
+      loop:
+        - curl
+        - net-tools
+        - tree
+
+    - name: Reboot machine
+      ansible.builtin.reboot:
