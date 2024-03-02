@@ -1,0 +1,39 @@
+- name: Install and setup Nginx
+  hosts: all
+  become: true
+  tasks:
+    - name: Update cache
+      apt:
+        update_cache: yes
+
+    - name: Copy config file
+      template:
+        src: "{{ playbook_dir }}/../cfgs/ansible.iphilka.ru.conf"
+        dest: /etc/nginx/sites-available/ansible.iphilka.ru.conf
+      # notify: Reload Nginx
+
+    - name: Copy index.html
+      copy:
+        src: ../cfgs/index.html
+        dest: /home/ansible-worker/www/index.html
+
+    - name: Create link for sites-enabled
+      file:
+        src: /etc/nginx/sites-available/ansible.iphilka.ru.conf
+        dest: /etc/nginx/sites-enabled/ansible.iphilka.ru.conf
+        state: link
+
+    - name: Remove default configuration link
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Reload Nginx
+
+    - name: start Nginx
+      service: name=nginx state=started
+
+  handlers:
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded

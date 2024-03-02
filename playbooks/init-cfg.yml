@@ -1,5 +1,5 @@
 - name: Initial server configuration
-  hosts: servers
+  hosts: all
   become: yes
   collections:
     - community.general
@@ -7,61 +7,124 @@
     - name: Update cache
       apt:
         update_cache: yes
+      tags: step1
 
-    - name: Create new user with sudo privileges
-      user:
-        name: "{{ created_username }}"
+    - name: install dependencies
+      apt:
+        name: "{{ item }}"
         state: present
-        groups: sudo
-        append: true
-        create_home: true
+      loop:
+        - nginx
+        - git
+      tags: step1
 
-    - name: Install OpenSSH server
+    - name: Create ansible-worker user
+      user:
+        name: ansible-worker
+        state: present
+      tags: step1
+
+    - name: Add ansible-worker to www-data group
+      user:
+        name: ansible-worker
+        groups: www-data
+        append: yes
+      tags: step1
+
+    - name: Add www-data group to home directory
+      command: chown -R www-data:ansible-worker /home/ansible-worker
+      tags: step1
+
+    # - name: Create new user with sudo privileges
+    #   user:
+    #     name: "ansible-worker"
+    #     state: present
+    #     groups: www-data, sudo
+    #     # append: true
+    #     # create_home: true
+    #   tags: step1
+
+    # - name: Create home directory for ansible-worker
+    #   file:
+    #     path: "/home/ansible-worker"
+    #     state: directory
+    #     owner: ansible-worker
+    #     group: ansible-worker
+    #     # mode: 0750
+    #   tags: step1
+
+    # - name: Change ownership and permissions of www
+    #   file:
+    #     path: "/home/ansible-worker/www"
+    #     state: file
+    #     owner: ansible-worker
+    #     group: ansible-worker
+    #     mode: 0644
+    #   tags: step1
+
+    - name: Check & install OpenSSH server
       ansible.builtin.apt:
         name: openssh-server
         state: present
+      tags: step2
 
     - name: Set authorized key for remote user
       ansible.posix.authorized_key:
-        user: "{{ created_username }}"
+        user: ansible-worker
         state: present
-        key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/' + key_name_ssh) }}"
+        key: "{{ lookup('file', inventory_dir + '/../ssh_keys/id_rsa.pub') }}"
+      tags: step2
 
-    - name: Disable password authentication for root
-      ansible.builtin.lineinfile:
-        path: /etc/ssh/sshd_config
-        state: present
-        regexp: '^#?PermitRootLogin'
-        line: 'PermitRootLogin prohibit-password'
+    # - name: Create www directory for ansible-worker
+    #   file:
+    #     path: "/home/ansible-worker/www"
+    #     state: directory
+    #     owner: ansible-worker
+    #     group: www-data, ansible-worker
+    #     # mode: "0750"
+    #   become_user: ansible-worker
+    #   tags: step3
+    - name: Create www directory inside ansible-worker's home directory
+      file:
+        path: /home/ansible-worker/www
+        state: directory
+        owner: ansible-worker
+        group: www-data
+      tags: step3
 
-    - name: Add Docker signing key
-      ansible.builtin.apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
-#        dest: /etc/apt/trusted.gpg.d/docker.gpg
-#        mode: '0644'
-#        force: true
+    - name: Add exception for dubious ownership
+      command: git config --global --add safe.directory /home/ansible-worker/www
+      tags: step3
 
-    - name: Add Docker APT repository
-      ansible.builtin.apt_repository:
-        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable"
-        state: present
+    - name: Clone repository
+      git:
+        repo: https://github.com/iphilka/stud-template.git
+        dest: /home/ansible-worker/www
+        clone: yes
+        update: yes
+        force: yes
+      tags: step3
 
-    - name: Add user to the docker group
-      ansible.builtin.user:
-        name: created_username
-        groups: docker
-        append: yes
+    - name: Set ownership to www-data and ansible-worker
+      become_user: root
+      shell: chown -R www-data:ansible-worker /home/ansible-worker/www
+      tags: step3
 
+    # - name: Set ownership and permissions
+    #   file:
+    #     path: /home/ansible-worker/www
+    #     state: directory
+    #     owner: ansible-worker
+    #     group: www-data
+    #   tags: step3
 
-    - name: Install dependencies
-      ansible.builtin.apt:
-        name: "{{ item }}"
-        state: latest
-      loop:
-        - curl
-        - net-tools
-        - tree
+    # - name: Clone repository to /home/ansible-worker/www/
+    #   git:
+    #     repo: https://github.com/iphilka/stud-template.git
+    #     dest: /home/ansible-worker/www/
+    #     clone: yes
+    #     update: yes
+    #     version: master
+    #   become_user: ansible-worker
+    #   tags: step3
 
-    - name: Reboot machine
-      ansible.builtin.reboot:
